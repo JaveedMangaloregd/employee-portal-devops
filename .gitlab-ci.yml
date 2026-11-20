@@ -1,3 +1,10 @@
+# AWS EXPLANATION:
+# This pipeline migrates deployment from Heroku to AWS EC2.
+# GitLab remains responsible for source control, testing, Docker builds and image storage.
+# AWS EC2 will pull the Docker image from GitLab Container Registry and run the application.
+# SSH is used by GitLab CI/CD to communicate with the EC2 instance.
+# Configure EC2_HOST, EC2_USER and EC2_SSH_PRIVATE_KEY in GitLab CI/CD variables.
+
 stages:
   - test
   - build
@@ -8,16 +15,28 @@ stages:
   - automated testing
   - deploy production
 
-   
+
 variables:
   IMAGE_TAG: $CI_REGISTRY_IMAGE/employee-image:$CI_COMMIT_SHORT_SHA    #$CI_COMMIT_REF_SLUG SHOT SHA MAKESTAG IMAGE IN DIFFERENT WAY TO KEEP HISTORY IMAGE TO SOLVE ROLLBACK
-  STAGING_APP: emp-portal-staging
-  HEROKU_STAGING: "registry.heroku.com/$STAGING_APP/web"
-  PRODUCTION_APP: emp-portal-production
+
+  # AWS EXPLANATION:
+  # These are Docker container names on the EC2 instance.
+  # Staging and production run as separate containers.
+  STAGING_CONTAINER: employee-portal-staging
+  PRODUCTION_CONTAINER: employee-portal-production
+
+  # AWS EXPLANATION:
+  # Staging is exposed through EC2 port 8081.
+  # Production is exposed through EC2 port 80.
+  STAGING_PORT: "8081"
+  PRODUCTION_PORT: "80"
+
   # FEATURE_APP: $CI_ENVIRONMENT_SLUG   #DYNAMIC ENV  gitlab env do no not resolve when u use var1 in var2 so we use this and herofeature directly in deploy feature stage
-  HEROKU_PRODUCTION: "registry.heroku.com/$PRODUCTION_APP/web"
   # HEROKU_FEATURE: "registry.heroku.com/$FEATURE_APP/web"
 
+# AWS EXPLANATION:
+# GitLab runs Python linting before building or deploying the application.
+# This job is retained from your original pipeline.
 lint_test:
   image: python:3.8.0-slim
   stage: test
@@ -30,6 +49,9 @@ lint_test:
     paths:
       - flake_reports/
 
+# AWS EXPLANATION:
+# Runs the existing pytest test suite.
+# No application test code is changed as part of this migration.
 pytest:
   image: python:3.8.0-slim
   stage: test
@@ -43,6 +65,11 @@ pytest:
     paths:
       - pytest_reports/
 
+# AWS EXPLANATION:
+# Docker builds the Employee Portal image.
+# The image is pushed to GitLab Container Registry.
+# EC2 will pull this same image during deployment.
+# No AWS ECR repository is required.
 # you can add this build stage after Procfile is made
 build:
   image: docker:latest
@@ -50,11 +77,11 @@ build:
     - docker:dind #docker image that runs in linked manner with a parent docker so dind is child image of docker where it generates TLS cert automatically
   stage: build
   before_script:
-    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY #U- USERNAME P- PASSWORD
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY" #U- USERNAME P- PASSWORD
   script:
     - docker build -t $IMAGE_TAG . # EVERYTHING IS MOVED TO GLOBAL VARIABLE
     - docker images
-    -docker push $IMAGE_TAG
+    - docker push $IMAGE_TAG
     #<registry URL>/<namespace>/<project>/<image> user name is gitlab username
     # $CI_COMMIT_REF_SLUG = app-logic
     # - docker build -t $CI_REGISTRY_IMAGE/employee-image:$CI_COMMIT_REF_SLUG
@@ -62,28 +89,49 @@ build:
 
 
 #DYNAMIC ENV
+
+# AWS EXPLANATION:
+# Each feature branch gets its own Docker container on EC2.
+# FEATURE_APP identifies the container.
+# FEATURE_PORT determines the host port used to access that feature environment.
+# The image is pulled from GitLab Container Registry.
+# The EC2 instance must allow access to the feature port range.
 deploy_feature:
-  image: docker:latest
-  services:
-    - docker:dind
+  image: alpine:3.20
   stage: deploy feature
   environment:
-    name: review/$CI_COMMIT_REF_NAME # dynamic environment
-    url: https://$CI_ENVIRONMENT_SLUG.herokuapp.com/
+    name: review/$CI_COMMIT_REF_NAME
+    url: http://$EC2_HOST:$FEATURE_PORT/
+    on_stop: stop-feature
   before_script:
+    - apk add --no-cache openssh-client
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - printf '%s\n' "$EC2_SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
     - export FEATURE_APP="$CI_ENVIRONMENT_SLUG"
-    - export HEROKU_FEATURE= "registry.heroku.com/$FEATURE_APP/web"
-    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY #U- USERNAME P- PASSWORD
+    - export FEATURE_PORT=$((10000 + CI_PIPELINE_IID % 50000))
   script:
     - echo "FEATURE_APP=$CI_ENVIRONMENT_SLUG" >> deploy_feature.env
-    - docker pull $IMAGE_TAG
-   #<registry.heroku.com>/<app>/<process-type>
-    - docker tag $IMAGE_TAG $HEROKU_FEATURE
-    - docker login -u _ -p $HEROKU_STAGING_API_KEY registry.heroku.com
-    - docker run --rm -e HEROKU_API_KEY=$HEROKU_STAGING_API_KEY wingrunr21/alphine-heroku-cli create $FEATURE_APP # this makes env run dynamically creating name
-    - docker push $HEROKU_STAGING
-    - docker run --rm -e HEROKU_API_KEY=$HEROKU_STAGING_API_KEY wingrunr21/alphine-heroku-cli container:release web --app $FEATURE_APP # SHORT CUT TO RELEASE
-    - echo "App deployed to FEATURE server at https://$FEATURE_APP.herokuapp.com/"
+    - echo "FEATURE_PORT=$FEATURE_PORT" >> deploy_feature.env
+    - |
+      ssh "$EC2_USER@$EC2_HOST" "
+        echo '$CI_REGISTRY_PASSWORD' | docker login -u '$CI_REGISTRY_USER' --password-stdin '$CI_REGISTRY' &&
+        docker pull '$IMAGE_TAG'
+      "
+    - |
+      ssh "$EC2_USER@$EC2_HOST" "
+        docker stop '$FEATURE_APP' || true
+        docker rm '$FEATURE_APP' || true
+        docker run -d \
+          --name '$FEATURE_APP' \
+          --restart unless-stopped \
+          -p '$FEATURE_PORT:5000' \
+          -e PORT=5000 \
+          '$IMAGE_TAG'
+      "
+    - echo "App deployed to FEATURE server at http://$EC2_HOST:$FEATURE_PORT/"
   artifacts:
     reports:
       dotenv: deploy_feature.env
@@ -91,25 +139,39 @@ deploy_feature:
   only:
     - /^feature-.*$/
 
+# AWS EXPLANATION:
+# Stops and removes the feature container from EC2.
+# It does not terminate or delete the EC2 instance.
 stop-feature:
-  image: docker:latest
+  image: alpine:3.20
+  stage: deploy feature
   environment:
-    name: review/$CI_COMMIT_REF_NAME # dynamic environment
-  services:
-    - docker:dind
+    name: review/$CI_COMMIT_REF_NAME
+    action: stop
   before_script:
+    - apk add --no-cache openssh-client
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - printf '%s\n' "$EC2_SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
     - export FEATURE_APP="$CI_ENVIRONMENT_SLUG"
   script:
-    - docker run --rm -e HEROKU_API_KEY=$HEROKU_STAGING_API_KEY wingrunr21/alphine-heroku-cli apps:destroy --app $FEATURE_APP --confirm $FEATURE_APP 
-    - echo "FEATURE application at server https://$FEATURE_APP.herokuapp.com/ is destroyed"
+    - ssh "$EC2_USER@$EC2_HOST" "docker stop '$FEATURE_APP' || true; docker rm '$FEATURE_APP' || true"
+    - echo "FEATURE application at server http://$EC2_HOST/ is destroyed"
+  when: manual
+  only:
+    - /^feature-.*$/
 
+# AWS EXPLANATION:
+# Tests the feature application using its EC2 public IP and dynamically assigned port.
 test_feature:
-  image: alphine
+  image: alpine:3.20
   stage: automated feature testing
   before_script:
     - apk --no-cache add curl
   script:
-    - curl https://$FEATURE_APP.herokuapp.com/ | grep "Employee Data"
+    - curl --fail "http://$EC2_HOST:$FEATURE_PORT/" | grep "Employee Data"
   dependencies:
     - deploy_feature # find jobs from stage executed before the current one
     # if artifacts of job set as dependencies unexpired or deleted than dependent job fails
@@ -117,24 +179,43 @@ test_feature:
     - /^feature-.*$/
 
 #Cd deployment stage
+
+# AWS EXPLANATION:
+# Deploys the staging image to the AWS EC2 instance.
+# The EC2 Docker daemon pulls the image from GitLab Container Registry.
+# The previous staging container is stopped and replaced.
+# Staging is accessible through port 8081.
 deploy_stage:
-  image: docker:latest
-  services:
-    - docker:dind
+  image: alpine:3.20
   stage: deploy staging
   environment:
-    name: staging # static environment
-    url: https://$STAGING_APP.herokuapp.com/
+    name: staging
+    url: http://$EC2_HOST:8081/
   before_script:
-    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY #U- USERNAME P- PASSWORD
+    - apk add --no-cache openssh-client
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - printf '%s\n' "$EC2_SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
   script:
-    - docker pull $IMAGE_TAG
-   #<registry.heroku.com>/<app>/<process-type>
-    - docker tag $IMAGE_TAG $HEROKU_STAGING
-    - docker login -u _ -p $HEROKU_STAGING_API_KEY registry.heroku.com
-    - docker push $HEROKU_STAGING
-    - docker run --rm -e HEROKU_API_KEY=$HEROKU_STAGING_API_KEY wingrunr21/alphine-heroku-cli container:release web --app $STAGING_APP # SHORT CUT TO RELEASE
-    - echo "App deployed to staging server at https://$STAGING_APP.herokuapp.com/"
+    - |
+      ssh "$EC2_USER@$EC2_HOST" "
+        echo '$CI_REGISTRY_PASSWORD' | docker login -u '$CI_REGISTRY_USER' --password-stdin '$CI_REGISTRY' &&
+        docker pull '$IMAGE_TAG'
+      "
+    - |
+      ssh "$EC2_USER@$EC2_HOST" "
+        docker stop '$STAGING_CONTAINER' || true
+        docker rm '$STAGING_CONTAINER' || true
+        docker run -d \
+          --name '$STAGING_CONTAINER' \
+          --restart unless-stopped \
+          -p 8081:5000 \
+          -e PORT=5000 \
+          '$IMAGE_TAG'
+      "
+    - echo "App deployed to staging server at http://$EC2_HOST:8081/"
    # registry.heroku.com/emp-portal-staging/web # emp-portal-staging is the new app repo name of heroku u supposed to put
    # MOVED TO GLOBAL VARIABLE
   only:
@@ -151,34 +232,67 @@ deploy_stage:
    #- echo "App deployed to staging server at https://$STAGING_URL.herokuapp.com/"
 
 
+# AWS EXPLANATION:
+# Sends an HTTP request to the staging application on EC2.
+# The job succeeds if the expected Employee Data text is present.
 test_stage:
-  image: alphine
+  image: alpine:3.20
   stage: automated testing
   before_script:
     - apk --no-cache add curl
   script:
-    - curl https://$STAGING_APP.herokuapp.com/ | grep "Employee Data"
+    - curl --fail "http://$EC2_HOST:8081/" | grep "Employee Data"
   only:
     - main
 
 #deployment production
+
+# AWS EXPLANATION:
+# Deploys the production container on EC2.
+# Production uses port 80.
+# Staging and production use different Docker container names.
 deploy_production:
-  image: docker:latest
-  services:
-    - docker:dind
+  image: alpine:3.20
   stage: deploy production
   environment:
-    name: production # static environment
-    url: https://$PRODUCTION_APP.herokuapp.com/
+    name: production
+    url: http://$EC2_HOST/
   before_script:
-    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - apk add --no-cache openssh-client
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - printf '%s\n' "$EC2_SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
   script:
-    - docker pull $IMAGE_TAG
-    - docker tag $IMAGE_TAG $HEROKU_PRODUCTION
-    - docker login -u _ -p $HEROKU_PRODUCTION_API_KEY registry.heroku.com
-    - docker push $HEROKU_PRODUCTION
-    - docker run --rm -e HEROKU_API_KEY=$HEROKU_PRODUCTION_API_KEY wingrunr21/alpine-heroku-cli container:release web --app $PRODUCTION_APP
-    - echo "App deployed to production server at https://$PRODUCTION_APP.herokuapp.com/"
+    - |
+      ssh "$EC2_USER@$EC2_HOST" "
+        echo '$CI_REGISTRY_PASSWORD' | docker login -u '$CI_REGISTRY_USER' --password-stdin '$CI_REGISTRY' &&
+        docker pull '$IMAGE_TAG'
+      "
+    - |
+      ssh "$EC2_USER@$EC2_HOST" "
+        docker stop '$PRODUCTION_CONTAINER' || true
+        docker rm '$PRODUCTION_CONTAINER' || true
+        docker run -d \
+          --name '$PRODUCTION_CONTAINER' \
+          --restart unless-stopped \
+          -p 80:5000 \
+          -e PORT=5000 \
+          '$IMAGE_TAG'
+      "
+    - echo "App deployed to production server at http://$EC2_HOST/"
   only:
     - main # only makes the main when other branches is merged to main so it deploys only that time  
  # when: manual #trigger manual deploy
+
+# Temporary AWS GitLab Runner connectivity test
+aws_runner_test:
+  stage: test
+  image: alpine:latest
+  tags:
+    - aws-ec2
+  script:
+    - echo "GitLab Runner is executing on AWS EC2"
+    - hostname
+    - whoami
