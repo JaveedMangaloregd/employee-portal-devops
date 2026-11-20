@@ -1,0 +1,184 @@
+stages:
+  - test
+  - build
+  - deploy staging
+  #- release_staging
+  - deploy feature
+  - automated feature testing
+  - automated testing
+  - deploy production
+
+   
+variables:
+  IMAGE_TAG: $CI_REGISTRY_IMAGE/employee-image:$CI_COMMIT_SHORT_SHA    #$CI_COMMIT_REF_SLUG SHOT SHA MAKESTAG IMAGE IN DIFFERENT WAY TO KEEP HISTORY IMAGE TO SOLVE ROLLBACK
+  STAGING_APP: emp-portal-staging
+  HEROKU_STAGING: "registry.heroku.com/$STAGING_APP/web"
+  PRODUCTION_APP: emp-portal-production
+  # FEATURE_APP: $CI_ENVIRONMENT_SLUG   #DYNAMIC ENV  gitlab env do no not resolve when u use var1 in var2 so we use this and herofeature directly in deploy feature stage
+  HEROKU_PRODUCTION: "registry.heroku.com/$PRODUCTION_APP/web"
+  # HEROKU_FEATURE: "registry.heroku.com/$FEATURE_APP/web"
+
+lint_test:
+  image: python:3.8.0-slim
+  stage: test
+  before_script:
+    - pip install flake8-html
+  script:
+    - flake8 --format=html --htmldir=flake_reports/
+  artifacts:
+    when: always
+    paths:
+      - flake_reports/
+
+pytest:
+  image: python:3.8.0-slim
+  stage: test
+  before_script:
+    - pip install pytest-html
+    - pip install -r requirements.txt
+  script:
+    - pytest --html=pytest_reports/pytest-report.html --self-contained-html
+  artifacts:
+    when: always
+    paths:
+      - pytest_reports/
+
+# you can add this build stage after Procfile is made
+build:
+  image: docker:latest
+  services:
+    - docker:dind #docker image that runs in linked manner with a parent docker so dind is child image of docker where it generates TLS cert automatically
+  stage: build
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY #U- USERNAME P- PASSWORD
+  script:
+    - docker build -t $IMAGE_TAG . # EVERYTHING IS MOVED TO GLOBAL VARIABLE
+    - docker images
+    -docker push $IMAGE_TAG
+    #<registry URL>/<namespace>/<project>/<image> user name is gitlab username
+    # $CI_COMMIT_REF_SLUG = app-logic
+    # - docker build -t $CI_REGISTRY_IMAGE/employee-image:$CI_COMMIT_REF_SLUG
+    # $CI_REGISTRY_IMAGE ="registry.gitlab.com/jav_kai/employee-portal"
+
+
+#DYNAMIC ENV
+deploy_feature:
+  image: docker:latest
+  services:
+    - docker:dind
+  stage: deploy feature
+  environment:
+    name: review/$CI_COMMIT_REF_NAME # dynamic environment
+    url: https://$CI_ENVIRONMENT_SLUG.herokuapp.com/
+  before_script:
+    - export FEATURE_APP="$CI_ENVIRONMENT_SLUG"
+    - export HEROKU_FEATURE= "registry.heroku.com/$FEATURE_APP/web"
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY #U- USERNAME P- PASSWORD
+  script:
+    - echo "FEATURE_APP=$CI_ENVIRONMENT_SLUG" >> deploy_feature.env
+    - docker pull $IMAGE_TAG
+   #<registry.heroku.com>/<app>/<process-type>
+    - docker tag $IMAGE_TAG $HEROKU_FEATURE
+    - docker login -u _ -p $HEROKU_STAGING_API_KEY registry.heroku.com
+    - docker run --rm -e HEROKU_API_KEY=$HEROKU_STAGING_API_KEY wingrunr21/alphine-heroku-cli create $FEATURE_APP # this makes env run dynamically creating name
+    - docker push $HEROKU_STAGING
+    - docker run --rm -e HEROKU_API_KEY=$HEROKU_STAGING_API_KEY wingrunr21/alphine-heroku-cli container:release web --app $FEATURE_APP # SHORT CUT TO RELEASE
+    - echo "App deployed to FEATURE server at https://$FEATURE_APP.herokuapp.com/"
+  artifacts:
+    reports:
+      dotenv: deploy_feature.env
+    #this should only work for the feature branch:
+  only:
+    - /^feature-.*$/
+
+stop-feature:
+  image: docker:latest
+  environment:
+    name: review/$CI_COMMIT_REF_NAME # dynamic environment
+  services:
+    - docker:dind
+  before_script:
+    - export FEATURE_APP="$CI_ENVIRONMENT_SLUG"
+  script:
+    - docker run --rm -e HEROKU_API_KEY=$HEROKU_STAGING_API_KEY wingrunr21/alphine-heroku-cli apps:destroy --app $FEATURE_APP --confirm $FEATURE_APP 
+    - echo "FEATURE application at server https://$FEATURE_APP.herokuapp.com/ is destroyed"
+
+test_feature:
+  image: alphine
+  stage: automated feature testing
+  before_script:
+    - apk --no-cache add curl
+  script:
+    - curl https://$FEATURE_APP.herokuapp.com/ | grep "Employee Data"
+  dependencies:
+    - deploy_feature # find jobs from stage executed before the current one
+    # if artifacts of job set as dependencies unexpired or deleted than dependent job fails
+  only:
+    - /^feature-.*$/
+
+#Cd deployment stage
+deploy_stage:
+  image: docker:latest
+  services:
+    - docker:dind
+  stage: deploy staging
+  environment:
+    name: staging # static environment
+    url: https://$STAGING_APP.herokuapp.com/
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY #U- USERNAME P- PASSWORD
+  script:
+    - docker pull $IMAGE_TAG
+   #<registry.heroku.com>/<app>/<process-type>
+    - docker tag $IMAGE_TAG $HEROKU_STAGING
+    - docker login -u _ -p $HEROKU_STAGING_API_KEY registry.heroku.com
+    - docker push $HEROKU_STAGING
+    - docker run --rm -e HEROKU_API_KEY=$HEROKU_STAGING_API_KEY wingrunr21/alphine-heroku-cli container:release web --app $STAGING_APP # SHORT CUT TO RELEASE
+    - echo "App deployed to staging server at https://$STAGING_APP.herokuapp.com/"
+   # registry.heroku.com/emp-portal-staging/web # emp-portal-staging is the new app repo name of heroku u supposed to put
+   # MOVED TO GLOBAL VARIABLE
+  only:
+    - main
+
+#if shortcut method not possible use this
+#release_stage:
+  #image: node:latest
+  #stage: release_staging
+  #before_script:
+   #- npm install -g heroku
+  #script:
+   #- HEROKU_API_KEY=$HEROKU_STAGING_API_KEY heroku container:release web --app $STAGING_URL
+   #- echo "App deployed to staging server at https://$STAGING_URL.herokuapp.com/"
+
+
+test_stage:
+  image: alphine
+  stage: automated testing
+  before_script:
+    - apk --no-cache add curl
+  script:
+    - curl https://$STAGING_APP.herokuapp.com/ | grep "Employee Data"
+  only:
+    - main
+
+#deployment production
+deploy_production:
+  image: docker:latest
+  services:
+    - docker:dind
+  stage: deploy production
+  environment:
+    name: production # static environment
+    url: https://$PRODUCTION_APP.herokuapp.com/
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker pull $IMAGE_TAG
+    - docker tag $IMAGE_TAG $HEROKU_PRODUCTION
+    - docker login -u _ -p $HEROKU_PRODUCTION_API_KEY registry.heroku.com
+    - docker push $HEROKU_PRODUCTION
+    - docker run --rm -e HEROKU_API_KEY=$HEROKU_PRODUCTION_API_KEY wingrunr21/alpine-heroku-cli container:release web --app $PRODUCTION_APP
+    - echo "App deployed to production server at https://$PRODUCTION_APP.herokuapp.com/"
+  only:
+    - main # only makes the main when other branches is merged to main so it deploys only that time  
+ # when: manual #trigger manual deploy
