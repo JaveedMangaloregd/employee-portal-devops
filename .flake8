@@ -1,0 +1,5 @@
+[flake8]
+per-file-ignores =
+    app.py: W292
+    models/models.py: E302,E111,W293,W292
+    test_app.py: E261,E262,E302,E111,E265,W292

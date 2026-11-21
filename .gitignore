@@ -1,0 +1,28 @@
+# Python virtual environment
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyc
+
+# Pytest
+.pytest_cache/
+htmlcov/
+.pytest_cache
+
+# Test database
+test_emp_db.db
+
+# Local database
+instance/
+
+# Environment variables
+.env
+
+# IDE files
+.vscode/
+
+# Temporary backup
+.gitlab-ci.yml.aws-backup

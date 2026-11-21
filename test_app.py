@@ -5,22 +5,26 @@ from app import app #pytest
 @pytest.fixture
 def client():
   initDB()
-  yield app.test_client()
-  truncateDB()
+  with app.app_context():
+    yield app.test_client()
+    truncateDB()
 
 def initDB():
   DATABASE = 'test_emp_db.db'
   app.config.update(
     SQLALCHEMY_DATABASE_URI='sqlite:///' + DATABASE
   )
+  with app.app_context():
+    models.db.create_all()
+    models.db.session.query(models.Employee).delete()
+    models.db.session.commit()
 
 def truncateDB():
-  models.Employee.querry.delete()
-  db.session.commit()
+  models.db.session.query(models.Employee).delete()
+  models.db.session.commit()
 
 #pytest
-def test_index():
-  client = app.test_client()
+def test_index(client):
   response = client.get('/')
   assert response.status_code == 200
 
@@ -42,8 +46,7 @@ def test_add(client):
   assert models.Employee.query.count() == 1
 
 #unit test
-def test_edit():
-  client = app.test_client()
+def test_edit(client):
   response = client.post('/edit/0')
   assert response.status_code == 200
   assert b"Sorry, the employee does not exist." in response.data
@@ -53,4 +56,4 @@ def test_delete(client):
   test_data = {'emp_id': 0}
   response = client.post('/delete', data=test_data)
   assert response.status_code == 200
-  assert b"Sorry, the employee does no exist." in response.data
+  assert b"Sorry, the employee does not exist." in response.data
