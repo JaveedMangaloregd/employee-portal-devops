@@ -188,6 +188,8 @@ test_feature:
 deploy_stage:
   image: alpine:3.20
   stage: deploy staging
+  tags:
+    - aws-ec2
   environment:
     name: staging
     url: http://$EC2_HOST:8081/
@@ -262,6 +264,8 @@ test_stage:
 deploy_production:
   image: alpine:3.20
   stage: deploy production
+  tags:
+    - aws_ec2
   environment:
     name: production
     url: http://$EC2_HOST/
