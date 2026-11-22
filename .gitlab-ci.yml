@@ -198,7 +198,7 @@ deploy_stage:
     - printf '%s\n' "$EC2_SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
     - chmod 600 ~/.ssh/id_rsa
     - echo "Checking EC2 host variable..."
-    - test -n "$EC2_HOST" || (echo "ERROR: EC2_HOST is empty"; exit 1)
+    - 'test -n "$EC2_HOST" || (echo "ERROR: EC2_HOST is empty"; exit 1)'
     - echo "EC2_HOST is available"
     - apk add --no-cache netcat-openbsd
     - echo "Testing SSH connectivity to EC2..."
