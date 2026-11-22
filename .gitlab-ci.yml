@@ -248,6 +248,8 @@ deploy_stage:
 test_stage:
   image: alpine:3.20
   stage: automated testing
+  tags:
+    - aws-ec2
   before_script:
     - apk --no-cache add curl
   script:
