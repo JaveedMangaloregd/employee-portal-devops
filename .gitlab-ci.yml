@@ -296,7 +296,10 @@ deploy_production:
           --restart unless-stopped \
           -p 80:5000 \
           -e PORT=5000 \
-          '$IMAGE_TAG'
+          -v employee-portal-production-db:/app/instance \
+          '$IMAGE_TAG' &&
+        sleep 3 &&
+        docker exec '$PRODUCTION_CONTAINER' python -c 'from app import app, db; ctx=app.app_context(); ctx.push(); db.create_all()'
       "
     - echo "App deployed to production server at http://$EC2_HOST/"
   only:
