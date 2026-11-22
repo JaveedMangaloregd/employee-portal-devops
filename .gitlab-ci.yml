@@ -270,7 +270,7 @@ deploy_production:
   image: alpine:3.20
   stage: deploy production
   tags:
-    - aws_ec2
+    - aws-ec2
   environment:
     name: production
     url: http://$EC2_HOST/
