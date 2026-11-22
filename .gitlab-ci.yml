@@ -256,7 +256,7 @@ test_stage:
   before_script:
     - apk --no-cache add curl
   script:
-    - curl --fail "http://$EC2_HOST:8081/" | grep "Employee Data"
+    - curl --fail "http://$EC2_HOST:8081/" | grep "Welcome to Javeed Kaiser Pvt. Limited"
   only:
     - main
 
