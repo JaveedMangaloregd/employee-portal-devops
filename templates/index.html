@@ -1,81 +1,138 @@
 {% extends 'template.html' %}
 
 {% block head %}
-<title>Employee Data</title>
+<title>Javeed Kaiser Pvt. Limited | Employee Portal</title>
+
 <style>
     .form-holder {
-        width: 60%;
-        margin-left: 15%;
-        margin-bottom: 50px;
-        padding: 20px;
-        border: 1px solid #eee;
-        margin-top: 20px;
-        border-radius: 4px;
+        width: 70%;
+        margin: 30px auto 50px auto;
+        padding: 25px;
+        border: 1px solid #E3E8E3;
+        border-radius: 10px;
+        background-color: #FFFFFF;
     }
 
     .card {
-        padding: 20px;
-        border: 1px solid #eee;
-        margin: 20px 0 30px 0;
-        border-radius: 4px;
-        box-shadow: 10px 7px 10px #ddd;
-        background-color: #f0f0f0;
+        padding: 22px;
+        border: 1px solid #E5EBE6;
+        margin: 20px 0 25px 0;
+        border-radius: 9px;
+        box-shadow: 0 3px 12px rgba(22, 78, 99, 0.06);
+        background-color: #FFFFFF;
+    }
+
+    .card h4 {
+        color: #164E63;
+        font-size: 20px;
+        margin-bottom: 15px;
+    }
+
+    .card p {
+        color: #64748B;
+        margin: 9px 0;
+        font-size: 15px;
+    }
+
+    .card p span {
+        color: #334155;
+        font-weight: 600;
     }
 
     .links {
         width: 100%;
         display: flex;
-        justify-content: right;
+        justify-content: flex-end;
+        align-items: center;
+        margin-top: 18px;
+        gap: 10px;
     }
 
     .action {
-        margin-left: 15px;
-        color: #333;
-        background-color: #fff;
-        padding: 8px 30px !important;
-        border-radius: 4px;
-        border: 1px solid #ccc;
-        font-size: 15px;
+        color: #DC5555;
+        background-color: #FFFFFF;
+        padding: 8px 25px !important;
+        border-radius: 5px;
+        border: 1px solid #DC5555;
+        font-size: 14px;
         width: auto !important;
     }
 
     .action:hover {
         cursor: pointer;
+        background-color: #DC5555;
+        color: #FFFFFF;
     }
 
     .edit-btn {
         text-decoration: none;
-        color: #333;
-        background-color: #fff;
-        padding: 5px 30px;
-        border-radius: 4px;
-        border: 1px solid #ccc;
-        font-size: 15px;
+        color: #2563EB;
+        background-color: #FFFFFF;
+        padding: 7px 25px;
+        border-radius: 5px;
+        border: 1px solid #2563EB;
+        font-size: 14px;
     }
 
     .edit-btn:hover {
-        background-color: #f3f3f3;
+        background-color: #2563EB;
+        color: #FFFFFF;
     }
 
     .add-new-btn {
-        margin-left: 15px;
-        width: 150px;
-        padding: 10px;
+        width: 170px;
+        padding: 11px;
         border: none;
         border-radius: 5px;
-        background: #6A82FB;
-        font-size: 16px;
-        color: #fff;
+        background: #0F766E;
+        font-size: 15px;
+        color: #FFFFFF;
         cursor: pointer;
         text-decoration: none;
-        margin: 10px 0 20px 0;
+        margin: 15px 0 25px 0;
         display: block;
         text-align: center;
     }
 
     .add-new-btn:hover {
-        cursor: pointer;
-        background-color: cornflowerblue;
+        background-color: #115E59;
+        color: #FFFFFF;
+    }
+
+    .banner {
+        text-align: center;
+        background: #164E63;
+        color: #FFFFFF;
+        padding: 35px 15px;
+        border-radius: 0 0 10px 10px;
+        margin-top: 0;
+    }
+
+    .banner h1 {
+        font-size: 30px;
+        margin-bottom: 10px;
+        line-height: normal;
+    }
+
+    .banner h3 {
+        font-size: 17px;
+        font-weight: normal;
+        color: #D5EAE5;
+    }
+
+    @media (max-width: 768px) {
+        .form-holder {
+            width: 90%;
+            padding: 15px;
+        }
+
+        .banner h1 {
+            font-size: 23px;
+        }
+
+        .card {
+            padding: 16px;
+        }
     }
 </style>
 {% endblock %}
@@ -84,36 +141,39 @@
 <div class="container">
 
     <div class="banner">
-        <h1>Employee Data</h1>
-        <h3>Welcome to Employee Portal</h3>
+        <h1>Welcome to Javeed Kaiser Pvt. Limited</h1>
+        <h3>Employee Management Portal</h3>
     </div>
 
     <div class="form-holder">
-        <h2 style="color: #cc0000;">{{ error }}</h2>
-        <a href="/add" class="add-new-btn">Add new employee</a>
+        <h2 style="color: #DC5555;">{{ error }}</h2>
+
+        <a href="/add" class="add-new-btn">+ Add New Employee</a>
+
         {% for emp in employees %}
         <div class="card">
             <div>
                 <h4>{{ emp.name }}</h4>
                 <p><span>Department:</span> {{ emp.department }}</p>
-                <p><span>Salary: </span>${{ emp.salary }}</p>
-                <p><span>Address: </span>{{ emp.address }}</p>
-                <p><span>Gender: </span>{{ emp.gender }}</p>
-                <p><span>Phone: </span>{{ emp.phone }}</p>
+                <p><span>Salary:</span> ${{ emp.salary }}</p>
+                <p><span>Address:</span> {{ emp.address }}</p>
+                <p><span>Gender:</span> {{ emp.gender }}</p>
+                <p><span>Phone:</span> {{ emp.phone }}</p>
             </div>
 
             <div class="links">
                 <a href="/edit/{{ emp.id }}" class="edit-btn">Edit</a>
+
                 <form action="/delete" method="POST" class="delete-form">
                     <input type="hidden" name="emp_id" value="{{ emp.id }}">
                     <input type="submit" name="submit" class="action"
-                        onclick="return confirm('Are you sure to remove this employee?')" value="Delete">
+                        onclick="return confirm('Are you sure to remove this employee?')"
+                        value="Delete">
                 </form>
             </div>
         </div>
         {% endfor %}
 
     </div>
-
 </div>
 {% endblock %}
