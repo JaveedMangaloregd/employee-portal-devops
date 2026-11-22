@@ -31,7 +31,7 @@ def test_index(client):
 #pytest
 def test_index_response(client):
   response = client.get('/')
-  assert b"Employee Data" in response.data
+  assert b'Welcome to Javeed Kaiser Pvt. Limited' in response.data
   assert models.Employee.query.count() == 0
 
 #unit test
