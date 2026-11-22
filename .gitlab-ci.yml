@@ -197,6 +197,8 @@ deploy_stage:
     - chmod 700 ~/.ssh
     - printf '%s\n' "$EC2_SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
     - chmod 600 ~/.ssh/id_rsa
+    - ssh-keygen -y -f ~/.ssh/id_rsa > /tmp/ci_deploy.pub
+    - ssh-keygen -lf /tmp/ci_deploy.pub
     - echo "Checking EC2 host variable..."
     - 'test -n "$EC2_HOST" || (echo "ERROR: EC2_HOST is empty"; exit 1)'
     - echo "EC2_HOST is available"
